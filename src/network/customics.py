@@ -12,6 +12,7 @@ from torch.optim import Adam
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from lifelines import KaplanMeierFitter
 
+# Import necessary modules
 from src.datasets.multi_omics_dataset import MultiOmicsDataset
 from src.models.autoencoder import AutoEncoder
 from src.encoders.encoder import Encoder
@@ -152,10 +153,16 @@ class CustOMICS(nn.Module):
         return loss
 
     def fit(self, omics_train, clinical_df, label, event=None, surv_time=None, omics_val=None, batch_size=32, n_epochs=30, verbose=False):
-        encoded_clinical_df = clinical_df.copy()
-        self.label_encoder = LabelEncoder().fit(encoded_clinical_df[label].values)
-        encoded_clinical_df[label] = self.label_encoder.transform(encoded_clinical_df[label].values)
-        self.one_hot_encoder = OneHotEncoder(sparse_output=False).fit(encoded_clinical_df[label].values.reshape(-1, 1))
+        # Assume labels are pre-encoded; use the number of unique values in label to set class count
+        self.num_classes = clinical_df[label].nunique()
+        
+        # Adjust classifier parameters if needed
+        self.classifier = MultiClassifier(
+            n_class=self.num_classes,
+            latent_dim=self.central_encoder.latent_dim,
+            dropout=self.classifier.dropout,
+            class_dim=self.classifier.class_dim
+        ).to(self.device)
 
         kwargs = {'num_workers': 2, 'pin_memory': True} if self.device.type == "cuda" else {}
         lt_samples_train = get_common_samples([df for df in omics_train.values()] + [clinical_df])
@@ -163,50 +170,22 @@ class CustOMICS(nn.Module):
         if self.survival_predictor and event and surv_time:
             self.baseline = self._compute_baseline(clinical_df, lt_samples_train, event, surv_time)
 
-        dataset_train = MultiOmicsDataset(omics_df=omics_train, clinical_df=encoded_clinical_df, lt_samples=lt_samples_train,
-                                          label=label, event=event, surv_time=surv_time)
+        dataset_train = MultiOmicsDataset(
+            omics_df=omics_train, clinical_df=clinical_df,
+            lt_samples=lt_samples_train, label=label, event=event, surv_time=surv_time
+        )
         train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=False, **kwargs)
-        
+
         if omics_val:
             lt_samples_val = get_common_samples([df for df in omics_val.values()] + [clinical_df])
-            dataset_val = MultiOmicsDataset(omics_df=omics_val, clinical_df=encoded_clinical_df, lt_samples=lt_samples_val,
-                                            label=label, event=event, surv_time=surv_time)
+            dataset_val = MultiOmicsDataset(
+                omics_df=omics_val, clinical_df=clinical_df,
+                lt_samples=lt_samples_val, label=label, event=event, surv_time=surv_time
+            )
             val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, **kwargs)
 
         self.history = []
         for epoch in range(n_epochs):
             overall_loss = 0
             self._switch_phase(epoch)
-            for batch_idx, (x, labels, os_time, os_event) in enumerate(train_loader):
-                self.train_all()
-                loss_train = self._train_loop(x, labels, os_time, os_event)
-                overall_loss += loss_train.item()
-                loss_train.backward()
-                self.optimizer.step()
-            average_loss_train = overall_loss / ((batch_idx + 1) * batch_size)
-            self.history.append(average_loss_train)
-
-            if verbose:
-                print(f"\tEpoch {epoch + 1} complete! \tAverage Loss Train: {average_loss_train:.4f}")
-
-            if omics_val:
-                overall_val_loss = 0
-                for batch_idx, (x, labels, os_time, os_event) in enumerate(val_loader):
-                    self.eval_all()
-                    loss_val = self._train_loop(x, labels, os_time, os_event)
-                    overall_val_loss += loss_val.item()
-                average_loss_val = overall_val_loss / ((batch_idx + 1) * batch_size)
-                self.history[-1] = (average_loss_train, average_loss_val)
-                if verbose:
-                    print(f"\tAverage Loss Val: {average_loss_val:.4f}")
-
-    def plot_loss(self):
-        n_epochs = len(self.history)
-        plt.title('Loss evolution with epochs')
-        plt.plot(range(n_epochs), [loss[0] if isinstance(loss, tuple) else loss for loss in self.history], label='Train Loss')
-        if any(isinstance(loss, tuple) for loss in self.history):
-            plt.plot(range(n_epochs), [loss[1] if isinstance(loss, tuple) else None for loss in self.history], label='Validation Loss')
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-        plt.legend()
-        plt.show()
+            for batch_idx, (x, labels, os_time, os_event) in enumerate(train

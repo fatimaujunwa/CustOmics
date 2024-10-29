@@ -72,12 +72,12 @@ class CustOMICS(nn.Module):
                                           class_dim=classif_params['hidden_layers']).to(self.device)
 
         # Optional survival model
-        self.lambda_survival = surv_params.get('lambda') if surv_params else 0
+        self.lambda_survival = surv_params['lambda'] if surv_params and 'lambda' in surv_params else 0
         if surv_params:
             surv_dims = [central_params['latent_dim']] + surv_params['dims'] + [1]
-            surv_param = {'drop': surv_params['dropout'], 'norm': surv_params['norm'],
-                          'dims': surv_dims, 'activation': surv_params['activation'],
-                          'l2_reg': surv_params['l2_reg'], 'device': self.device}
+            surv_param = {'drop': surv_params.get('dropout', 0.5), 'norm': surv_params.get('norm', False),
+                          'dims': surv_dims, 'activation': surv_params.get('activation', 'SELU'),
+                          'l2_reg': surv_params.get('l2_reg', 1e-2), 'device': self.device}
             self.survival_predictor = SurvivalNet(surv_param)
         else:
             self.survival_predictor = None

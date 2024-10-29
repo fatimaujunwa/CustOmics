@@ -188,4 +188,36 @@ class CustOMICS(nn.Module):
         for epoch in range(n_epochs):
             overall_loss = 0
             self._switch_phase(epoch)
-            for batch_idx, (x, labels, os_time, os_event) in enumerate(train
+            for batch_idx, (x, labels, os_time, os_event) in enumerate(train_loader):
+                self.train_all()
+                loss_train = self._train_loop(x, labels, os_time, os_event)
+                overall_loss += loss_train.item()
+                loss_train.backward()
+                self.optimizer.step()
+            average_loss_train = overall_loss / ((batch_idx + 1) * batch_size)
+            self.history.append(average_loss_train)
+
+            if verbose:
+                print(f"\tEpoch {epoch + 1} complete! \tAverage Loss Train: {average_loss_train:.4f}")
+
+            if omics_val:
+                overall_val_loss = 0
+                for batch_idx, (x, labels, os_time, os_event) in enumerate(val_loader):
+                    self.eval_all()
+                    loss_val = self._train_loop(x, labels, os_time, os_event)
+                    overall_val_loss += loss_val.item()
+                average_loss_val = overall_val_loss / ((batch_idx + 1) * batch_size)
+                self.history[-1] = (average_loss_train, average_loss_val)
+                if verbose:
+                    print(f"\tAverage Loss Val: {average_loss_val:.4f}")
+
+    def plot_loss(self):
+        n_epochs = len(self.history)
+        plt.title('Loss evolution with epochs')
+        plt.plot(range(n_epochs), [loss[0] if isinstance(loss, tuple) else loss for loss in self.history], label='Train Loss')
+        if any(isinstance(loss, tuple) for loss in self.history):
+            plt.plot(range(n_epochs), [loss[1] if isinstance(loss, tuple) else None for loss in self.history], label='Validation Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.show()
